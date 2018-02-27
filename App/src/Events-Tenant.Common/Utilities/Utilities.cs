@@ -59,7 +59,7 @@ namespace Events_Tenant.Common.Utilities
                 else
                 {
                     var wingtipUser = tenantServerConfig.TenantServer.Split('-')[2];
-                    tenantAlias = tenant + "-" + wingtipUser;
+                    tenantAlias = tenant + "-" + wingtipUser + ".database.windows.net";
                 }
 
                 var result = await Sharding.RegisterNewShard(tenant, tenantId, tenantAlias, tenantServerConfig.TenantServer, databaseConfig.DatabaseServerPort, catalogConfig.ServicePlan);
@@ -117,6 +117,26 @@ namespace Events_Tenant.Common.Utilities
             normalized[0] ^= 0x80;
 
             return normalized;
+        }
+
+        /// <summary>
+        /// Gets the status of the tenant mapping in the catalog.
+        /// </summary>
+        public String GetTenantStatus(int TenantId)
+        {
+            try
+            {
+                int mappingStatus = (int)Sharding.ShardMap.GetMappingForKey(TenantId).Status;
+
+                if (mappingStatus > 0)
+                    return "Online";
+                else
+                    return "Offline";
+            }
+            catch
+            {
+               throw;
+            }
         }
 
         #endregion
