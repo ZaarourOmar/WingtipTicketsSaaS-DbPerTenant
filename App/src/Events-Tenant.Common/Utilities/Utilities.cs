@@ -122,6 +122,7 @@ namespace Events_Tenant.Common.Utilities
         /// <summary>
         /// Gets the status of the tenant mapping in the catalog.
         /// </summary>
+        /// <param name="TenantId">The tenant identifier.</param>
         public String GetTenantStatus(int TenantId)
         {
             try
@@ -137,6 +138,16 @@ namespace Events_Tenant.Common.Utilities
             {
                throw;
             }
+        }
+
+        /// <summary>
+        /// Resolves any mapping differences between the global shard map in the catalog and the local shard map located a tenant database
+        /// </summary>
+        /// <param name="tenantId">The tenant identifier.</param>
+        /// <param name="UseGlobalShardMap">Specifies if the global shard map or the local shard map should be used as the source of truth for resolution.</param>
+        public void ResolveMappingDifferences(int TenantId, bool UseGlobalShardMap = false)
+        {
+            Sharding.ResolveMappingDifferences(TenantId, UseGlobalShardMap);
         }
 
         #endregion
