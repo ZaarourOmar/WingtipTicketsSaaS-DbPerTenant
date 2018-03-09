@@ -4,9 +4,9 @@ In this tutorial, you explore a full disaster recovery scenario for a multi-tena
 
 Geo-restore is the lowest-cost disaster recovery solution.  However, restoring from geo-redundant backups can result in data loss and can take a considerable time, depending on the size of the databases. **To recover applications with the lowest possible RPO and RTO, use geo-replication instead of geo-restore**.
 
-To reduce recovery time when restoring large numbers of databases in elastic pools, restore databases in parallel into multiple pools at the same time. To repatriate databases once the outage is resolved, use geo-replication, which incurs no data loss and minimizes disruption. 
+To reduce recovery time when restoring large numbers of databases in elastic pools, restore databases in parallel into multiple pools. To repatriate databases once the outage is resolved, use geo-replication, which incurs no data loss and minimizes disruption. 
 
-For multi-tenant applications with a catalog database that identifies where the active copy of each tenant's database is located, the catalog database is also restored and repatriated. Then as each tenant database is restored or repatriated, the catalog is updated with the new database location.
+For multi-tenant applications using a catalog database, you first restore or repatriate the catalog database. Then, as each tenant database is restored or repatriated, the catalog is updated with the new database location.
 
 This tutorial explores both restore and repatriation workflows. You'll learn how to:
 
@@ -15,7 +15,7 @@ This tutorial explores both restore and repatriation workflows. You'll learn how
 * Recover catalog and tenant databases using _geo-restore_
 * Repatriate the tenant catalog and changed tenant databases using _geo-replication_ after the outage is resolved
 * Update the catalog as each database is restored or repatriated to track the current location of the active copy of each tenant's database
-* Redirect all application requests to ensure they are handled by the application instance deployed in the same region as the active database  
+* Ensure the application and tenant database are always colocated in the same Azure region to reduce latency  
  
 
 Before starting this tutorial, make sure the following prerequisites are completed:
@@ -36,10 +36,10 @@ Later, in a separate repatriation step, you use geo-replication to copy the cata
 
 In a final step, you clean up the resources created in the recovery region.  
 
-> Note that the application is recovered into the _paired region_ of the region in which the application is deployed. For more information, see [Azure paired regions](https://docs.microsoft.com/en-us/azure/best-practices-availability-paired-regions).   
+> Note: the application is recovered into the _paired region_ of the region in which the application is deployed. For more information, see [Azure paired regions](https://docs.microsoft.com/en-us/azure/best-practices-availability-paired-regions).   
 
 Recovering a SaaS app with its many components into another region needs careful orchestration. You need to: 
-* Provision servers and pools in the recovery region to reserve capacity for existing tenants and allow new tenants to be provisioned  
+* Provision servers and pools in the recovery region to reserve capacity for new and existing tenants  
 * Deploy the app in the recovery region and enable it to continue provisioning new tenants
 * Restore tenant databases across all elastic pools in parallel to ensure maximum throughput
 * Submit restore requests in batches to avoid service throttling limits
@@ -88,7 +88,7 @@ In this task, you start a process to sync the configuration of the servers, elas
 
 Leave the PowerShell window running in the background and continue with the rest of the tutorial. 
 
-> Note: the catalog sync process connects to the active catalog via a DNS alias that is modified during restore and repatriation. This ensures that changes made to database and pool configuration in the recovery region are propagated to the original region during repatriation.
+> Note: It is important that configuration changes made in the recovery region are preserved after repatriation.  To achieve this, the sync process connects to the catalog via a DNS alias. The alias is modified during restore and repatriation to always point to the active catalog.
 
 ## Restore tenant resources into the recovery region
 
@@ -104,9 +104,9 @@ The restore process reserves the required capacity, enables new tenants to be pr
 1. Provisions an instance of the app in the recovery region and configures it to use the restored catalog in that region.
 
 1. Provisions a server and elastic pool in which new tenants will be provisioned. 
-	* To keep app-to-database latency to a minimum, the sample app is designed so that it only connects to a tenant database in the same region.  If the app in one region detects that the active copy of a tenant database is in another region, it will redirect to an instance of the app in the other region. This is important during repatriation.
+	* To keep app-to-database latency to a minimum, the sample app is designed so that it always connects to a tenant database in the same region.
 		
-1. Provisions the recovery server and elastic pools required for restoring the existing tenant databases. The servers and pools are a mirror image of servers and pools in the original region, with additional server and pool for new tenants.  Provisioning pools up-front is important to reserve all the capacity needed.
+1. Provisions the recovery server and elastic pools required for restoring existing tenant databases. The configuration in the recovery region is a mirror image of the configuration in the original region.  An additional server and pool is provisioned for new tenants.  Provisioning pools up-front is important to reserve all the capacity needed.
 	* An outage in one region may place significant pressure on the resources available in the paired region.  Reserving resources quickly is recommended. Consider using geo-replication if it is critical that an application must be recovered in a specific region. 
 
 1. Enables the Traffic Manager endpoint for the Web app in the recovery region, which allows the application to provision new tenants.   
@@ -124,13 +124,13 @@ The restore process reserves the required capacity, enables new tenants to be pr
 
 > IMPORTANT This tutorial restores databases from geo-redundant backups. These backups may not be available for 10-20 minutes after initial database creation. Wait for 20 mins from installation of the app before running this script.
 
-Now run the recovery script which automates the restore steps previously described:
+Now run the recovery script that automates the restore steps previously described:
 
 1. In the *PowerShell ISE*, open the ...\Learning Modules\Business Continuity and Disaster Recovery\DR-RestoreFromBackup\Demo-RestoreFromBackup.ps1 script and set the following values:
 	* **$DemoScenario = 2, Recover the SaaS app into a recovery region by restoring from geo-redundant backups**
 
 2. Press **F5** to run the script.  
-	* The script starts a series of PowerShell jobs that run in parallel which restore servers, pools and databases to the recovery region. 
+	* The script starts a series of PowerShell jobs that run in parallel which restore servers, pools, and databases to the recovery region. 
 	* The recovery region is the paired region associated with the region in which you deployed the application. For more information, see [Azure paired regions](https://docs.microsoft.com/en-us/azure/best-practices-availability-paired-regions). 
 
 	Monitor the status of the recovery process in the console section of the PowerShell window.
@@ -140,15 +140,15 @@ Now run the recovery script which automates the restore steps previously describ
 >To explore the code for the recovery jobs, review the PowerShell scripts in the ...\Learning Modules\Business Continuity and Disaster Recovery\DR-RestoreFromBackup\RecoveryJobs folder.
 
 ## Review the application state during recovery
-While the tenant databases are being restored, the tenants are marked offline in the catalog.  Once the application has been deployed to the recovery region and activated, attempts to connect to individual tenants will be unsuccessful until their databases are restored and marked online.  It's important to design your application to handle a tenant being marked offline.
+Tenants are marked offline in the catalog while their databases are restoring.  Connections to tenant databases are unsuccessful until they are restored and marked online.  It's important to design your application to handle offline tenant databases.
 
 1. Before the restore process completes, refresh the Wingtip Tickets Events Hub in your web browser (http://events.wingtip-dpt.&lt;user&gt;.trafficmanager.net - substitute &lt;user&gt; with your deployment's user value). 
-	* Notice that tenants that are not yet restored are marked as offline, and that opening an offline tenant events page displays a tenant offline notification. 
+	* Notice that tenants that are not yet restored are marked as offline.  If you click on an offline tenant, its events page displays a 'tenant offline' notification. 
 
 ## Provision a new tenant in the recovery region
-Even before the tenants are recovered you can provision new tenants, which now occurs in the recovery region. Provisioning uses the new-tenant recovery server and pool that were created during the earlier restore process in the recovery region. Provisioning a new tenant impacts the repatriation process in two ways:
-1. As the catalog in the recovery region is changed by this action, the catalog will be repatriated to the origin region.
-1. The new-tenant server, its pool and any databases there are repatriated to the origin region. 
+Even before the existing tenant databases are restored you can provision new tenants, which now occurs in the recovery region. When you provision a new tenant, it will cause the new database and the updated catalog to be repatriated later.
+
+1. **ADD PROVISION STEPS HERE**
 
 ## Review the recovered state of the application
 
@@ -165,35 +165,33 @@ Once the application is fully recovered, review how it behaves.
 
 1. In the Events Hub, click on Contoso Concert Hall and open its events browse page, which is now available. Notice that the tenants recovery server referenced in the footer is the recovery server in the recovery region.
 
-1. In the [Azure portal](https://portal.azure.com), inspect the recovery resource group.  Notice that the application and recovery servers are deployed in the paired region of the ordinal deployment of the app.
+1. In the [Azure portal](https://portal.azure.com), inspect the recovery resource group.  Notice that the application and recovery servers are in the paired region of the original app deployment.
 
 ## Change tenant data 
-In this task you will modify some data in one of the restored tenant databases.  This simulates activity by a tenant that occurs after the outage. The repatriation process to be run shortly will copy any restored databases that have been changed to the original region. 
+In this task, you update one of the restored tenant databases. The repatriation process will copy restored databases that have been changed to the original region. 
 
 1. In your browser, find the events list for the Contoso Concert Hall and note the last event name.
-1. In the *PowerShell ISE*, in the ...\Learning Modules\Business Continuity and Disaster Recovery\DR-RestoreFromBackup\Demo-RestoreFromBackup.ps1 script, set the following:
+1. In the *PowerShell ISE*, in the ...\Learning Modules\Business Continuity and Disaster Recovery\DR-RestoreFromBackup\Demo-RestoreFromBackup.ps1 script, set the following value:
 	* **$DemoScenario = 3** (Delete last event)
 1. Press **F5** to execute the script
 1. Refresh the Contoso Concert Hall events page (http://events.wingtip-dpt.&lt;user&gt;.trafficmanager.net/contosoconcerthall - substitute &lt;user&gt; with your deployment's user value) and notice that the last event has been deleted.
 
 ## Repatriate the application to its original production region
 
-In this task you repatriate the application to its original region.  in the case of a real outage, repatriation would only be triggered once you're satisfied the outage is resolved. Note that an outage may be resolved before the restore has completed. For this reason, starting repatriation cancels any ongoing restore activity.
+In this task, you repatriate the application to its original region.  in a real outage, repatriation would only be triggered once you're satisfied the outage is resolved. Note that an outage may be resolved before the restore has completed. For this reason, starting repatriation cancels any ongoing restore activity.
 
-The scope of repatriation varies depending on circumstances. Databases that weren't restored, or were restored but unchanged, can be reactivated immediately in the original region - these databases won't have suffered any data loss. If new tenants were added in the recovery region during the outage, or any pool or database configuration was changed, then the catalog is repatriated.  New tenant databases and restored tenant databases that have been updated post-restore are repatriated. 
-
-The repatriation process does the following:
-1. Reactivates tenant databases in the original region that have not been restored to the recovery region, or if restored, have not been changed there. These databases will be exactly as last accessed by their tenants. once reactivated, these tenants are  immediately available to the application.
+The repatriation process:
+1. Reactivates tenant databases in the original region that have not been restored to the recovery region and restored databases that have not been changed. These databases will be exactly as last accessed by their tenants and are immediately available to the application.
 1. Causes new tenant onboarding to occur in the original region so no further tenant databases are created in the recovery region.
 1. Cancels any outstanding or in-flight database restore requests.
-1. Copies all restored databases _that have been changed post-restore_ to the original region. This includes the catalog database if it has changed.
+1. Copies all restored databases _that have been changed post-restore_ to the original region.
 1. Cleans up resources created in the recovery region during the restore process.
 
-It's important that steps 1-3 are done promptly to limit the number of tenant databases that need to be repatriated.  
+To limit the number of tenant databases that need to be repatriated, steps 1-3 are done promptly.  
 
-It's important that step 4 causes no further disruption to tenants and no data loss. To achieve this goal, you use _geo-replication_ to 'move' changed databases to the original region. If the app is working well in the recovery region, there may not be any great urgency to move databases back to the production region. 
+It's important that step 4 causes no further disruption to tenants and no data loss. To achieve this goal, the process uses _geo-replication_ to 'move' changed databases to the original region. If the app is working well in the recovery region, there may not be any great urgency to move databases back to the production region. 
 
-Once each database to be repatriated has been replicated to the original region it is failed over.  Failing the database over to the replica effectively moves the database to the original region. Failing over a database causes any open connections to be dropped briefly and the database to be unavailable for a few seconds (99th percentile is under five seconds).  Applications should be written with retry logic to ensure they connect again when this happens.  Although this brief disconnect is often not noticed, you may choose to repatriate databases out of business hours. 
+Once each database to be repatriated has been replicated to the original region, it is failed over.  Failing the database over to the replica effectively moves the database to the original region. When the database fails over, any open connections are dropped and the database is unavailable for a few seconds. Applications should be written with retry logic to ensure they connect again.  Although this brief disconnect is often not noticed, you may choose to repatriate databases out of business hours. 
 
 Once a database is failed over to its replica in the production region, the restored database in the recovery region can be deleted. The database in the production region then relies on geo-restore for DR protection again. 
 
@@ -208,8 +206,8 @@ Now let's assume the outage is resolved and run the repatriation script.  This s
 1. Press **F5** to run the recovery script. The repatriation of the changed databases will take several minutes.
 1. While the script is running, refresh the Events Hub page (http://events.wingtip-dpt.&lt;user&gt;.trafficmanager.net - substitute &lt;user&gt; with your deployment's user value)
 	* Notice that all the tenants are online and accessible throughout this process.
-1. Click on the Fabrikam Jazz Club, and if you did not modify this tenant, notice from the footer that the server is already reverted to the original production server.
-1. Open or refresh the Contoso Concert Hall events page and notice from the footer that the database is on the _-recovery_ server initially.  
+1. Click on the Fabrikam Jazz Club to open it. If you did not modify this tenant, notice from the footer that the server is already reverted to the original production server.
+1. Open or refresh the Contoso Concert Hall events page and notice from the footer that the database is still on the _-recovery_ server initially.  
 1. Refresh the Contoso Concert Hall events page when the repatriation process completes and notice that the server is now the original server.
 
 ## Clean up recovery region resources after repatriation
@@ -217,6 +215,10 @@ Once repatriation completes, it's safe to delete the resources in the recovery r
 1. Open the [Azure portal](https://portal.azure.com) and delete the **ADD NAME OF RG HERE** resource group.
 	* Deleting these resources promptly is recommended as it stops billing for them.
 
+## Design the application to ensure app and database are colocated 
+The sample app is designed so that the application always connects from aninstance in the same region as the tenant database. This design reduces latency between the application and the database.  This optimization assumes the app-to-database interaction is chattier than the user-to-app interaction.  
+
+Tenant databases may be spread across recovery and original regions for some time during repatriation.  The app looks up the region hosting the tenant database server (by doing a DNS lookup on the server name). If the application instance isn't in the same region as the database, it redirects to the application instance in the same region as the database server.  
 
 ## Next steps
 
